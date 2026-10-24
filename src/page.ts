@@ -112,12 +112,22 @@ async function recordPause(tabId: number, log: TabLog, p: any) {
 	await send(tabId, "Debugger.resume").catch(() => {});
 }
 
-/** The active tab of this window, with the debugger attached and logging. */
+/** The tab the panel was opened on, set by the background on the action click. */
+let pinned: number | undefined;
+export const setPinnedTab = (id: number | undefined) => {
+	pinned = id;
+};
+
+/** The pinned tab, with the debugger attached and logging. */
 async function tab(): Promise<number> {
-	const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
-	if (t?.id === undefined) throw new Error("No active tab");
-	if (!logs.has(t.id)) {
-		const target = { tabId: t.id };
+	const wanted = pinned ?? (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.id;
+	if (wanted === undefined) throw new Error("No tab");
+	const t = await chrome.tabs.get(wanted).catch(() => {
+		throw new Error("The tab this panel was opened on is gone; close the panel and open it again on a tab");
+	});
+	const id = t.id!;
+	if (!logs.has(id)) {
+		const target = { tabId: id };
 		try {
 			await chrome.debugger.attach(target, "1.3");
 		} catch (e) {
@@ -128,11 +138,11 @@ async function tab(): Promise<number> {
 				throw new Error(`Another tool or extension is debugging ${t.url}; close it and retry (${e2})`);
 			});
 		}
-		logs.set(t.id, { console: [], network: new Map(), hooks: [], pauses: [], scripts: new Map(), wasmScripts: new Map(), bps: new Map(), dbg: false });
-		await Promise.all(["Runtime.enable", "Log.enable", "Network.enable", "Page.enable"].map((m) => send(t.id!, m)));
-		await send(t.id, "Runtime.addBinding", { name: "__piHook" });
+		logs.set(id, { console: [], network: new Map(), hooks: [], pauses: [], scripts: new Map(), wasmScripts: new Map(), bps: new Map(), dbg: false });
+		await Promise.all(["Runtime.enable", "Log.enable", "Network.enable", "Page.enable"].map((m) => send(id, m)));
+		await send(id, "Runtime.addBinding", { name: "__piHook" });
 	}
-	return t.id;
+	return id;
 }
 
 /** One CDP command on the active tab; reattaches once if the session was dropped (user cancelled the banner, crash). */

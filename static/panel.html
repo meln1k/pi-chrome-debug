@@ -18,6 +18,10 @@
 	.tool, .result, .thinking { color: var(--dim); }
 	.tool, .result { font: 11px/1.4 ui-monospace, monospace; }
 	.thinking { font-style: italic; border-left: 2px solid var(--line2); padding-left: 10px; }
+	.run { color: var(--dim); font: 11px/1.4 ui-monospace, monospace; }
+	.run > summary { color: var(--dim); }
+	.run > summary:hover, .run[open] > summary { color: var(--fg); }
+	.run > *:not(summary) { margin: 6px 0 0 12px; }
 	summary { cursor: pointer; font-style: normal; }
 	summary:hover { color: var(--fg); }
 	.error { color: #b00020; }

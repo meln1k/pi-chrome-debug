@@ -17,10 +17,20 @@ import { type CodemodeRemote, RemoteCodemodeSandbox } from "@earendil-works/pi-c
 import { createCodemodeExtension } from "@earendil-works/pi-durable/codemode";
 import { IndexedDbStorage } from "@earendil-works/pi-durable/storage/indexeddb";
 import { FileTools, filesEnv } from "./files.ts";
-import { PageTools } from "./page.ts";
+import { PageTools, setPinnedTab } from "./page.ts";
 import { DebuggerPrompt } from "./prompt.ts";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+// Tools stay on the tab the panel was opened on: capture it when the panel is shown, and keep it
+// while the panel is hidden by a tab switch, so a run in flight never drifts to another tab.
+const pinActiveTab = async () => {
+	const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
+	if (t?.id !== undefined) setPinnedTab(t.id);
+};
+void pinActiveTab();
+document.addEventListener("visibilitychange", () => {
+	if (document.visibilityState === "visible") void pinActiveTab();
+});
 const log = $<HTMLDivElement>("log");
 const input = $<HTMLTextAreaElement>("input");
 const sendBtn = $<HTMLButtonElement>("send");
@@ -198,6 +208,15 @@ const el = (cls: string, text: string, tag = "div") => {
 	return e;
 };
 const short = (s: string, n = 600) => (s.length > n ? `${s.slice(0, n)}…` : s);
+// Every details the user opened, keyed by its place in the transcript, so re-renders keep it open.
+const openDetails = new Set<string>();
+const details = (key: string, cls: string) => {
+	const d = document.createElement("details");
+	d.className = cls;
+	d.open = openDetails.has(key);
+	d.addEventListener("toggle", () => (d.open ? openDetails.add(key) : openDetails.delete(key)));
+	return d;
+};
 const userText = (c: string | { type: string; text?: string }[]) => (typeof c === "string" ? c : c.map((p) => p.text ?? "[image]").join(""));
 
 function render(view: ConversationView) {
@@ -216,32 +235,64 @@ function render(view: ConversationView) {
 		renderChats(chat.id);
 	}
 
-	for (const m of messages) {
+	// Thinking and tool calls between two agent messages collapse into one row.
+	let run: { el: HTMLDetailsElement; key: string; tools: Map<string, number> } | undefined;
+	const flush = () => {
+		if (!run) return;
+		const total = [...run.tools.values()].reduce((a, b) => a + b, 0);
+		const names = [...run.tools].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).slice(0, 3).join(", ");
+		run.el.prepend(el("", total ? `Ran ${total} tool ${total === 1 ? "call" : "calls"}${names ? ` · ${names}` : ""}` : "Thinking", "summary"));
+		out.push(run.el);
+		run = undefined;
+	};
+	const group = (key: string, node: HTMLElement, tool?: string) => {
+		if (!run || run.key !== key) {
+			flush();
+			run = { el: details(key, "run"), key, tools: new Map() };
+		}
+		run.el.append(node);
+		if (tool) run.tools.set(tool, (run.tools.get(tool) ?? 0) + 1);
+	};
+
+	// A run ends only at a user message or agent text, so thinking and tools from several
+	// messages still form one row; breakAt keeps its key stable across re-renders.
+	let breakAt = -1;
+	messages.forEach((m, i) => {
+		const key = `run-${view.conversation.id}-${breakAt}`;
 		if (m.role === "user") {
+			flush();
+			breakAt = i;
 			out.push(el("user", userText(m.content)));
 		} else if (m.role === "assistant") {
-			for (const c of m.content) {
+			m.content.forEach((c, ci) => {
 				if (c.type === "thinking" && c.thinking.trim()) {
-					const d = el("thinking", "", "details") as HTMLDetailsElement;
-					d.open = m === live?.generation?.message; // expanded while it streams
+					const d = details(`t-${view.conversation.id}-${i}-${ci}`, "thinking");
 					d.append(el("", c.redacted ? "Thinking (redacted)" : "Thinking", "summary"), el("", c.thinking));
-					out.push(d);
+					group(key, d);
 				}
-				if (c.type === "text" && c.text.trim()) out.push(el("assistant", c.text));
+				if (c.type === "text" && c.text.trim()) {
+					flush();
+					breakAt = i;
+					out.push(el("assistant", c.text));
+				}
 				if (c.type === "toolCall") {
-					const d = el("tool", "", "details");
+					const d = details(`c-${view.conversation.id}-${i}-${ci}`, "tool");
 					d.append(el("", `▸ ${c.name} ${short(JSON.stringify(c.arguments), 120)}`, "summary"), el("", JSON.stringify(c.arguments, null, 1), "pre"));
-					out.push(d);
+					group(key, d, c.name);
 				}
+			});
+			if (m.stopReason === "error") {
+				flush();
+				out.push(el("error", m.errorMessage ?? "model error"));
 			}
-			if (m.stopReason === "error") out.push(el("error", m.errorMessage ?? "model error"));
 		} else if (m.role === "toolResult") {
-			const d = el(`result${m.isError ? " error" : ""}`, "", "details");
+			const d = details(`r-${view.conversation.id}-${i}`, `result${m.isError ? " error" : ""}`);
 			const body = m.content.map((c) => (c.type === "text" ? c.text : "[image]")).join("\n");
 			d.append(el("", `◂ ${m.toolName}: ${short(body.split("\n")[0] ?? "", 100)}`, "summary"), el("", short(body, 5000), "pre"));
-			out.push(d);
+			group(key, d);
 		}
-	}
+	});
+	flush();
 	if (live?.generation?.retry) out.push(el("error", `Retrying: ${live.generation.retry.error}`));
 	if (!out.length) out.push(el("empty", hasKey() ? "Ask anything about the page in your active tab." : "Add an API key in settings to start."));
 	log.replaceChildren(...out);

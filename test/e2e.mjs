@@ -91,6 +91,14 @@ if (step === "all") {
 	const secret = await page.evaluate(() => window.wasm.exports.secret(7));
 	console.log("PAGE secret(7) after patched reload:", secret);
 	if (secret !== 21) throw new Error("wasm addExport/apply step failed");
+	// the panel is pinned to the tab it was opened on: another active tab must not become the target
+	const other = await browser.newPage();
+	await other.goto("http://localhost:8765/game.html");
+	await other.bringToFront();
+	await ask("Using page_eval only, set document.title to 'pinned'.");
+	const pinnedTitle = await page.title();
+	console.log("PAGE title (pinned tab):", pinnedTitle, "| other tab:", await other.title());
+	if (pinnedTitle !== "pinned" || (await other.title()) === "pinned") throw new Error("pinned tab step failed");
 } else {
 	// persistence check: transcript reloaded from IndexedDB
 	const items = await panel.$$eval("#log > *", (e) => e.map((x) => x.className));
