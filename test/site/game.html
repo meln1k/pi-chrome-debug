@@ -1,0 +1,18 @@
+<!doctype html><title>Game</title>
+<style>body { margin: 0; font: 14px sans-serif } header { height: 150px; padding: 10px } canvas { margin-left: 60px; width: 400px; height: 300px; border: 1px solid #999 }</style>
+<header><h1>Canvas game</h1><p>Click the red circle, then press Escape. Only real input counts.</p><p id="status">Hits: 0, keys: none</p></header>
+<canvas id="c" width="800" height="600"></canvas>
+<script>
+// Backing store is 2x the CSS size, so canvas pixels != CSS pixels. Untrusted (synthetic) events are ignored, like many games.
+window.game = { hits: 0, misses: 0, keys: [] };
+const c = document.getElementById("c"), g = c.getContext("2d");
+g.fillStyle = "#eee"; g.fillRect(0, 0, 800, 600);
+g.fillStyle = "red"; g.beginPath(); g.arc(600, 400, 40, 0, 7); g.fill(); // CSS (300, 200) inside the canvas
+const status = () => document.getElementById("status").textContent = `Hits: ${game.hits}, keys: ${game.keys.join(",") || "none"}`;
+c.addEventListener("pointerdown", (e) => {
+  if (!e.isTrusted) return;
+  Math.hypot(e.offsetX - 300, e.offsetY - 200) < 20 ? game.hits++ : game.misses++;
+  status();
+});
+addEventListener("keydown", (e) => { if (e.isTrusted) { game.keys.push(e.key); status(); } });
+</script>

@@ -1,0 +1,27 @@
+<!doctype html><title>Deep</title>
+<!-- Fixture for wasm_breakpoint and the wasm toolkit. Source of wasm-deep.wasm
+(wabt parseWat + toBinary({write_debug_names:true})), regenerate if it changes:
+(module
+  (import "env" "save" (func $save (param i32)))
+  (func $secret (param $s i32) (result i32) local.get $s i32.const 3 i32.mul)
+  (func $inner (param $x i32) (result i32) (local $tmp i32)
+    local.get $x i32.const 2 i32.mul local.set $tmp
+    local.get $tmp call $save local.get $tmp)
+  (func $outer (param $n i32) (result i32) local.get $n call $inner)
+  (export "run" (func $outer))
+  (export "inner" (func $inner)))
+-->
+<h1>Wasm breakpoints</h1>
+<button id="run">Run</button>
+<p>Result: <b id="result"></b></p>
+<script>
+const imports = { env: { save: (v) => console.log("saved", v) } };
+const ready = fetch("/wasm-deep.wasm")
+	.then((r) => r.arrayBuffer())
+	.then((b) => WebAssembly.instantiate(b, imports))
+	.then(({ instance }) => (window.wasm = instance));
+ready.then((i) => i.exports.run(6)); // boot call: $outer -> $inner -> env.save
+document.getElementById("run").onclick = () => {
+	document.getElementById("result").textContent = window.wasm.exports.run(6);
+};
+</script>

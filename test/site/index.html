@@ -1,0 +1,19 @@
+<!doctype html><title>Shop</title>
+<h1 id="title">My Shop</h1>
+<ul id="items"></ul>
+<p>Total: <b id="total"></b></p>
+<button id="checkout">Checkout</button>
+<script>
+window.app = {
+  cart: [{ name: "Book", price: "12.50", qty: 2 }, { name: "Pen", price: "1.25", qty: 4 }],
+  user: null,
+  total() { return this.cart.reduce((s, i) => s + i.price * i.qty, ""); }, // bug: "" seed -> string concat
+  render() {
+    document.getElementById("items").innerHTML = this.cart.map(i => `<li>${i.name} x${i.qty}</li>`).join("");
+    document.getElementById("total").textContent = this.total();
+  },
+};
+app.render();
+fetch("/api/user").then(r => { if (!r.ok) console.error("Failed to load user", r.status); });
+document.getElementById("checkout").onclick = () => app.user.name; // TypeError
+</script>

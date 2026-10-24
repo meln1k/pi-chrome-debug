@@ -1,0 +1,12 @@
+{
+	"manifest_version": 3,
+	"name": "Pi Debugger",
+	"version": "0.1.0",
+	"description": "An AI agent in a side panel with full DevTools access to the active tab.",
+	"permissions": ["debugger", "sidePanel", "storage", "tabs"],
+	"host_permissions": ["https://openrouter.ai/*", "https://opencode.ai/*"],
+	"side_panel": { "default_path": "panel.html" },
+	"background": { "service_worker": "background.js" },
+	"action": { "default_title": "Open Pi Debugger" },
+	"content_security_policy": { "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" }
+}

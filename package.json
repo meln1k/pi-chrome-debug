@@ -1,0 +1,27 @@
+{
+  "name": "pi-debugger",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "rm -rf dist && cp -r static dist && cp node_modules/quickjs-wasi/quickjs.wasm dist/ && esbuild src/panel.ts src/codemode-worker.ts --bundle --format=esm --platform=browser --outdir=dist --log-level=warning",
+    "check": "tsc",
+    "e2e": "node test/e2e.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@earendil-works/chord": "^1.4.0",
+    "@earendil-works/pi-ai": "^1.4.0",
+    "@earendil-works/pi-codemode": "^1.4.0",
+    "@earendil-works/pi-durable": "^1.4.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.6",
+    "esbuild": "^0.28.2",
+    "puppeteer-core": "^25.16.0",
+    "typescript": "^7.0.2"
+  },
+  "type": "module"
+}
