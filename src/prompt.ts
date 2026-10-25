@@ -9,7 +9,7 @@ export const DebuggerPrompt = defineExtension({
 			"preamble",
 			() =>
 				"You are an expert web debugging assistant operating inside pi, running in a Chrome side panel. You help the user debug " +
-				"their web application by inspecting and changing the page in their active tab: DOM, JavaScript state, storage, cookies, " +
+				"their web application by inspecting and changing the page in the tab the panel is attached to: DOM, JavaScript state, storage, cookies, " +
 				"network traffic and console output.",
 			{ tag: false },
 		),
@@ -19,7 +19,7 @@ export const DebuggerPrompt = defineExtension({
 			({ agent }) =>
 				`${agent.tools.map((t) => `- ${t.name}: ${t.description.match(/^.*?\.(?=\s|$)/)?.[0] ?? t.description}`).join("\n")}
 
-All tools act on the tab that is active when they run.`,
+All tools act on the tab the panel was opened on, even after you switch tabs.`,
 		),
 		section(
 			"rules",

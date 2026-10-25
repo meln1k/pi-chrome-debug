@@ -23,11 +23,21 @@ import { DebuggerPrompt } from "./prompt.ts";
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 // Tools stay on the tab the panel was opened on: capture it when the panel is shown, and keep it
 // while the panel is hidden by a tab switch, so a run in flight never drifts to another tab.
+let pinnedId: number | undefined;
 const pinActiveTab = async () => {
 	const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
-	if (t?.id !== undefined) setPinnedTab(t.id);
+	if (t?.id !== undefined) {
+		pinnedId = t.id;
+		setPinnedTab(t.id);
+	}
 };
 void pinActiveTab();
+// Closing the pinned tab falls back to the active tab instead of failing every tool.
+chrome.tabs.onRemoved.addListener((id) => {
+	if (id !== pinnedId) return;
+	pinnedId = undefined;
+	setPinnedTab(undefined);
+});
 document.addEventListener("visibilitychange", () => {
 	if (document.visibilityState === "visible") void pinActiveTab();
 });
@@ -235,50 +245,44 @@ function render(view: ConversationView) {
 		renderChats(chat.id);
 	}
 
-	// Thinking and tool calls between two agent messages collapse into one row.
-	let run: { el: HTMLDetailsElement; key: string; tools: Map<string, number> } | undefined;
+	// A run ends only at a user message or agent text: thinking, tool calls and their results
+	// from several messages form one row, keyed by its first child so its open state survives.
+	let run: { el: HTMLDetailsElement; tools: Map<string, number>; results: Map<string, number> } | undefined;
 	const flush = () => {
 		if (!run) return;
-		const total = [...run.tools.values()].reduce((a, b) => a + b, 0);
-		const names = [...run.tools].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).slice(0, 3).join(", ");
-		run.el.prepend(el("", total ? `Ran ${total} tool ${total === 1 ? "call" : "calls"}${names ? ` · ${names}` : ""}` : "Thinking", "summary"));
+		const calls = [...run.tools.values()].reduce((a, b) => a + b, 0);
+		const names = [...(calls ? run.tools : run.results)].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).slice(0, 3).join(", ");
+		const label = calls ? `Ran ${calls} tool ${calls === 1 ? "call" : "calls"}` : run.results.size ? "Tool result" : "Thinking";
+		run.el.prepend(el("", `${label}${names ? ` · ${names}` : ""}`, "summary"));
 		out.push(run.el);
 		run = undefined;
 	};
-	const group = (key: string, node: HTMLElement, tool?: string) => {
-		if (!run || run.key !== key) {
-			flush();
-			run = { el: details(key, "run"), key, tools: new Map() };
-		}
+	const group = (childKey: string, node: HTMLElement, tool?: string, result?: string) => {
+		if (!run) run = { el: details(childKey, "run"), tools: new Map(), results: new Map() };
 		run.el.append(node);
 		if (tool) run.tools.set(tool, (run.tools.get(tool) ?? 0) + 1);
+		if (result) run.results.set(result, (run.results.get(result) ?? 0) + 1);
 	};
 
-	// A run ends only at a user message or agent text, so thinking and tools from several
-	// messages still form one row; breakAt keeps its key stable across re-renders.
-	let breakAt = -1;
 	messages.forEach((m, i) => {
-		const key = `run-${view.conversation.id}-${breakAt}`;
 		if (m.role === "user") {
 			flush();
-			breakAt = i;
 			out.push(el("user", userText(m.content)));
 		} else if (m.role === "assistant") {
 			m.content.forEach((c, ci) => {
 				if (c.type === "thinking" && c.thinking.trim()) {
 					const d = details(`t-${view.conversation.id}-${i}-${ci}`, "thinking");
 					d.append(el("", c.redacted ? "Thinking (redacted)" : "Thinking", "summary"), el("", c.thinking));
-					group(key, d);
+					group(`t-${view.conversation.id}-${i}-${ci}`, d);
 				}
 				if (c.type === "text" && c.text.trim()) {
 					flush();
-					breakAt = i;
 					out.push(el("assistant", c.text));
 				}
 				if (c.type === "toolCall") {
 					const d = details(`c-${view.conversation.id}-${i}-${ci}`, "tool");
 					d.append(el("", `▸ ${c.name} ${short(JSON.stringify(c.arguments), 120)}`, "summary"), el("", JSON.stringify(c.arguments, null, 1), "pre"));
-					group(key, d, c.name);
+					group(`c-${view.conversation.id}-${i}-${ci}`, d, c.name);
 				}
 			});
 			if (m.stopReason === "error") {
@@ -289,12 +293,12 @@ function render(view: ConversationView) {
 			const d = details(`r-${view.conversation.id}-${i}`, `result${m.isError ? " error" : ""}`);
 			const body = m.content.map((c) => (c.type === "text" ? c.text : "[image]")).join("\n");
 			d.append(el("", `◂ ${m.toolName}: ${short(body.split("\n")[0] ?? "", 100)}`, "summary"), el("", short(body, 5000), "pre"));
-			group(key, d);
+			group(`r-${view.conversation.id}-${i}`, d, undefined, m.toolName);
 		}
 	});
 	flush();
 	if (live?.generation?.retry) out.push(el("error", `Retrying: ${live.generation.retry.error}`));
-	if (!out.length) out.push(el("empty", hasKey() ? "Ask anything about the page in your active tab." : "Add an API key in settings to start."));
+	if (!out.length) out.push(el("empty", hasKey() ? "Ask anything about the page in this tab." : "Add an API key in settings to start."));
 	log.replaceChildren(...out);
 
 	const running = live?.tools?.find((t) => t.status === "running");

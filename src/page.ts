@@ -1,4 +1,4 @@
-// Page tools: everything goes through the Chrome DevTools Protocol on the active tab.
+// Page tools: everything goes through the Chrome DevTools Protocol on the attached tab.
 import { Type } from "@earendil-works/pi-ai";
 import type { JsonValue } from "@earendil-works/chord";
 import { defineExtension, defineTool, type ToolExecutionResult } from "@earendil-works/pi-durable";
@@ -145,7 +145,7 @@ async function tab(): Promise<number> {
 	return id;
 }
 
-/** One CDP command on the active tab; reattaches once if the session was dropped (user cancelled the banner, crash). */
+/** One CDP command on the attached tab; reattaches once if the session was dropped (user cancelled the banner, crash). */
 async function cmd(method: string, params?: object): Promise<any> {
 	const id = await tab();
 	try {
@@ -209,7 +209,7 @@ const lastViewport = new Map<number, string>();
 const screenshot = defineTool({
 	name: "page_screenshot",
 	description:
-		"Screenshot of the visible part of the active tab, scaled so 1 image pixel = 1 CSS pixel of the viewport (at zoom 1), whatever the devicePixelRatio. " +
+		"Screenshot of the visible part of the attached tab, scaled so 1 image pixel = 1 CSS pixel of the viewport (at zoom 1), whatever the devicePixelRatio. " +
 		"Image coordinates plus the crop origin are viewport coordinates, the units page_mouse takes. Reports viewport size, devicePixelRatio and scroll.",
 	parameters: Type.Object({
 		crop: Type.Optional(
@@ -259,7 +259,7 @@ const mouse = defineTool({
 	// Input must land in order, and the effect report must not see another call's effects.
 	executionMode: "sequential",
 	description:
-		"Real (trusted) mouse input on the active tab, at viewport coordinates in CSS px (the units of page_screenshot's image), or at the center of a CSS selector, which is scrolled into view. " +
+		"Real (trusted) mouse input on the attached tab, at viewport coordinates in CSS px (the units of page_screenshot's image), or at the center of a CSS selector, which is scrolled into view. " +
 		"Not canvas backing-store pixels. Use down/move/up to drag. Returns the element that was under the pointer.",
 	parameters: Type.Object({
 		action: Type.Optional(Type.Union([Type.Literal("click"), Type.Literal("double"), Type.Literal("down"), Type.Literal("up"), Type.Literal("move")], { description: "Default click" })),
@@ -349,7 +349,7 @@ const keys = defineTool({
 	// Input must land in order, and the effect report must not see another call's effects.
 	executionMode: "sequential",
 	description:
-		"Real (trusted) keyboard input to the focused element of the active tab: keydown/keypress/input/keyup like a person typing. " +
+		"Real (trusted) keyboard input to the focused element of the attached tab: keydown/keypress/input/keyup like a person typing. " +
 		'Pass text to type it, and/or key for one key or shortcut: "Enter", "Escape", "ArrowUp", "F5", "w", "Ctrl+A", "Shift+Tab". Focus a field first with page_mouse.',
 	parameters: Type.Object({
 		text: Type.Optional(Type.String({ description: "Typed character by character; \\n presses Enter" })),
@@ -367,7 +367,7 @@ const keys = defineTool({
 const consoleLogs = defineTool({
 	name: "console_logs",
 	description:
-		"Console messages, uncaught exceptions and browser log entries of the active tab, captured since the debugger attached (first tool call on the tab). Reload the page to capture startup logs.",
+		"Console messages, uncaught exceptions and browser log entries of the attached tab, captured since the debugger attached (first tool call on the tab). Reload the page to capture startup logs.",
 	parameters: Type.Object({
 		limit: Type.Optional(Type.Number({ description: "Newest N entries, default 100" })),
 		clear: Type.Optional(Type.Boolean({ description: "Clear the buffer after reading" })),
@@ -387,7 +387,7 @@ const consoleLogs = defineTool({
 const network = defineTool({
 	name: "network_requests",
 	description:
-		"Network requests of the active tab captured since the debugger attached: id, method, status, type, url. " +
+		"Network requests of the attached tab captured since the debugger attached: id, method, status, type, url. " +
 		'Get a response body with cdp {method:"Network.getResponseBody", params:{requestId}}.',
 	parameters: Type.Object({
 		filter: Type.Optional(Type.String({ description: "Substring the URL must contain" })),
@@ -406,7 +406,7 @@ const network = defineTool({
 const cdp = defineTool({
 	name: "cdp",
 	description:
-		"Send any Chrome DevTools Protocol command to the active tab and get its JSON result. Examples: Page.reload, Page.navigate {url}, " +
+		"Send any Chrome DevTools Protocol command to the attached tab and get its JSON result. Examples: Page.reload, Page.navigate {url}, " +
 		"Network.getResponseBody {requestId}, Network.getCookies, Network.setCookie, Storage.clearDataForOrigin, Emulation.setDeviceMetricsOverride, " +
 		"Page.addScriptToEvaluateOnNewDocument {source}, DOM.*, CSS.*, Debugger.*. params is a JSON object.",
 	parameters: Type.Object({ method: Type.String(), params: Type.Optional(Type.Any()) }),
@@ -483,7 +483,7 @@ async function setPreload(tabId: number, name: string, source: string | undefine
 const preload = defineTool({
 	name: "page_preload",
 	description:
-		"Named scripts that run in every new document of the active tab before its own scripts (also right away in the current one): " +
+		"Named scripts that run in every new document of the attached tab before its own scripts (also right away in the current one): " +
 		"hooks, helper globals, fetch overrides. They survive reloads, so state you need after a reload belongs here. " +
 		"add replaces a script of the same name; list shows what is live. A broken hook can break the app's boot: remove it and reload.",
 	parameters: Type.Object({
@@ -720,7 +720,7 @@ const pickFn = (m: WasmModule, fn?: string | number) => {
 const wasm = defineTool({
 	name: "wasm",
 	description:
-		"Read and rewrite the WebAssembly module loaded in the active tab. actions: functions (index, name, signature, body range), disasm (fn, or offset+size), callers (who calls fn), xrefs (who mentions an address), " +
+		"Read and rewrite the WebAssembly module loaded in the attached tab. actions: functions (index, name, signature, body range), disasm (fn, or offset+size), callers (who calls fn), xrefs (who mentions an address), " +
 		"patch (fn + hex, body-size preserving, padded with nops), addExport (fn + name, e.g. expose an internal open()), apply (serve the patched module for a URL pattern). " +
 		"After patch or addExport, call apply with a pattern such as *game*.wasm, then cdp Page.reload to run it. Bytes come from Chrome's live copy, so a 100 MB module is not downloaded again.",
 	parameters: Type.Object({

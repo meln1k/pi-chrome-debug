@@ -1,6 +1,6 @@
 # Pi Debugger
 
-A Chrome side-panel extension that puts an AI agent in your browser. It inspects and changes the active tab
+A Chrome side-panel extension that puts an AI agent in your browser. It inspects and changes the tab the panel is attached to
 over the DevTools Protocol — JS state, screenshots, real mouse/keyboard input, console, network, storage — and
 reverse-engineers WebAssembly: functions, disassembly, xrefs, callers, patching, new exports, and breakpoints
 that capture wasm-to-wasm stacks and locals.

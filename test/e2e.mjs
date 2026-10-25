@@ -99,6 +99,25 @@ if (step === "all") {
 	const pinnedTitle = await page.title();
 	console.log("PAGE title (pinned tab):", pinnedTitle, "| other tab:", await other.title());
 	if (pinnedTitle !== "pinned" || (await other.title()) === "pinned") throw new Error("pinned tab step failed");
+	// every tool result stays in the same collapsed row as its call, and no row is mislabelled
+	const badRuns = await panel.evaluate(() => {
+		const bad = [];
+		for (const d of document.querySelectorAll("details.run")) {
+			const kids = [...d.children].slice(1);
+			const has = (c) => kids.some((k) => k.classList.contains(c));
+			if (d.querySelector("summary")?.textContent === "Thinking" && !has("thinking")) bad.push("mislabeled run");
+			if (has("result") && !has("tool")) bad.push("result without its call");
+		}
+		return bad;
+	});
+	console.log("run grouping problems:", badRuns.length);
+	if (badRuns.length) throw new Error(`run grouping: ${badRuns.slice(0, 3).join(", ")}`);
+	// closing the pinned tab falls back to the active tab instead of failing every tool
+	await page.close();
+	await other.bringToFront();
+	await ask("Using page_eval only, set document.title to 'fallback'.");
+	console.log("other tab title after closing the pinned tab:", await other.title());
+	if ((await other.title()) !== "fallback") throw new Error("closed pinned tab step failed");
 } else {
 	// persistence check: transcript reloaded from IndexedDB
 	const items = await panel.$$eval("#log > *", (e) => e.map((x) => x.className));
