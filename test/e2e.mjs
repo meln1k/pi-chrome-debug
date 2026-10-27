@@ -20,7 +20,7 @@ const sw = await (await browser.waitForTarget((t) => t.type() === "service_worke
 await sw.evaluate(async () => { while (!(await chrome.sidePanel.getPanelBehavior()).openPanelOnActionClick) await new Promise((r) => setTimeout(r, 50)); });
 const [ext] = (await browser.extensions()).values();
 await page.triggerExtensionAction(ext);
-const panelTarget = await browser.waitForTarget((t) => t.url().endsWith("/panel.html"));
+const panelTarget = await browser.waitForTarget((t) => t.url().includes("/panel.html"));
 const panel = await panelTarget.asPage();
 panel.on("console", (m) => console.log("panel console:", m.text()));
 panel.on("pageerror", (e) => console.log("panel error:", e.message));
@@ -91,14 +91,18 @@ if (step === "all") {
 	const secret = await page.evaluate(() => window.wasm.exports.secret(7));
 	console.log("PAGE secret(7) after patched reload:", secret);
 	if (secret !== 21) throw new Error("wasm addExport/apply step failed");
-	// the panel is pinned to the tab it was opened on: another active tab must not become the target
+	// the panel is bound to the tab it was opened on, whatever tab is active
 	const other = await browser.newPage();
 	await other.goto("http://localhost:8765/game.html");
 	await other.bringToFront();
-	await ask("Using page_eval only, set document.title to 'pinned'.");
-	const pinnedTitle = await page.title();
-	console.log("PAGE title (pinned tab):", pinnedTitle, "| other tab:", await other.title());
-	if (pinnedTitle !== "pinned" || (await other.title()) === "pinned") throw new Error("pinned tab step failed");
+	const bound = await panel.evaluate(async () => {
+		const id = Number(new URLSearchParams(location.search).get("tab"));
+		const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+		const mine = await chrome.tabs.get(id);
+		return { panel: mine.url, active: active.url };
+	});
+	console.log("panel tab:", bound.panel, "| active tab:", bound.active);
+	if (!bound.panel.includes("wasm-deep.html") || !bound.active.includes("game.html")) throw new Error("panel is not bound to its tab");
 	// every tool result stays in the same collapsed row as its call, and no row is mislabelled
 	const badRuns = await panel.evaluate(() => {
 		const bad = [];
@@ -112,12 +116,6 @@ if (step === "all") {
 	});
 	console.log("run grouping problems:", badRuns.length);
 	if (badRuns.length) throw new Error(`run grouping: ${badRuns.slice(0, 3).join(", ")}`);
-	// closing the pinned tab falls back to the active tab instead of failing every tool
-	await page.close();
-	await other.bringToFront();
-	await ask("Using page_eval only, set document.title to 'fallback'.");
-	console.log("other tab title after closing the pinned tab:", await other.title());
-	if ((await other.title()) !== "fallback") throw new Error("closed pinned tab step failed");
 } else {
 	// persistence check: transcript reloaded from IndexedDB
 	const items = await panel.$$eval("#log > *", (e) => e.map((x) => x.className));

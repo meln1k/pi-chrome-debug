@@ -21,26 +21,22 @@ import { PageTools, setPinnedTab } from "./page.ts";
 import { DebuggerPrompt } from "./prompt.ts";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-// Tools stay on the tab the panel was opened on: capture it when the panel is shown, and keep it
-// while the panel is hidden by a tab switch, so a run in flight never drifts to another tab.
-let pinnedId: number | undefined;
-const pinActiveTab = async () => {
+// The panel URL carries its tab (background sets panel.html?tab=<id>), so each tab has its own
+// panel document: it never moves to another tab and its tools always target that tab.
+let tabId = Number(new URLSearchParams(location.search).get("tab")) || undefined;
+if (tabId === undefined) {
+	// First open after the service worker slept uses the default path: redirect once to this tab's
+	// URL so the panel still becomes tab-specific instead of following whatever tab is active.
 	const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
-	if (t?.id !== undefined) {
-		pinnedId = t.id;
-		setPinnedTab(t.id);
+	if (t?.id !== undefined && !sessionStorage.getItem("pi-tab-redirect")) {
+		sessionStorage.setItem("pi-tab-redirect", "1");
+		location.replace(`panel.html?tab=${t.id}`);
+		await new Promise(() => {});
 	}
-};
-void pinActiveTab();
-// Closing the pinned tab falls back to the active tab instead of failing every tool.
-chrome.tabs.onRemoved.addListener((id) => {
-	if (id !== pinnedId) return;
-	pinnedId = undefined;
-	setPinnedTab(undefined);
-});
-document.addEventListener("visibilitychange", () => {
-	if (document.visibilityState === "visible") void pinActiveTab();
-});
+}
+setPinnedTab(tabId);
+// Each tab keeps its own conversation; opening the panel on a new tab starts a new one.
+const chatKey = tabId === undefined ? undefined : `chat:${tabId}`;
 const log = $<HTMLDivElement>("log");
 const input = $<HTMLTextAreaElement>("input");
 const sendBtn = $<HTMLButtonElement>("send");
@@ -193,6 +189,7 @@ const renderChats = (current: ConversationId) => {
 let conv: Conversation;
 let watch: ConversationWatch | undefined;
 async function openChat(id: ConversationId) {
+	if (chatKey) void chrome.storage.session.set({ [chatKey]: String(id) });
 	await watch?.stop();
 	conv = (await harness.conversation(id, ctx))!;
 	await conv.configure(agentChange(), ctx);
@@ -335,6 +332,15 @@ input.onkeydown = (e) => {
 	}
 };
 
-await openChat(chats.reduce((a, b) => (b.at > a.at ? b : a)).id);
+const saved = chatKey ? ((await chrome.storage.session.get(chatKey))[chatKey] as string | undefined) : undefined;
+const resume = saved ? chats.find((c) => String(c.id) === saved) : chatKey ? undefined : chats.reduce((a, b) => (b.at > a.at ? b : a));
+if (resume) await openChat(resume.id);
+else {
+	// A tab without a session gets its own new chat; other tabs' chats are untouched.
+	const c = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: agentChange() }, ctx);
+	chats.push({ id: c.id, title: "New chat", at: Date.now() });
+	await saveChats();
+	await openChat(c.id);
+}
 if (!hasKey()) dialog.showModal();
 document.body.dataset.ready = "1";

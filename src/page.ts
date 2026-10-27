@@ -66,7 +66,9 @@ chrome.debugger.onEvent.addListener((src, method, p: any) => {
 	} else if (method === "Debugger.paused") {
 		void recordPause(src.tabId!, log, p);
 	} else if (method === "Fetch.requestPaused") {
-		if (log.patched) {
+		// The pattern can match HTML too (e.g. *wasm* matches wasm-deep.html); only replace wasm bodies.
+		const isWasm = (p.responseHeaders ?? []).some((h: any) => /^content-type$/i.test(h.name) && /application\/wasm/i.test(h.value)) || /\.wasm(\?|$)/i.test(p.request.url ?? "");
+		if (log.patched && isWasm) {
 			// The body may change size and is no longer encoded: drop the headers that describe the original.
 			const headers = (p.responseHeaders ?? []).filter((h: any) => !/^(content-length|content-encoding|transfer-encoding)$/i.test(h.name));
 			void send(src.tabId!, "Fetch.fulfillRequest", {
@@ -160,6 +162,17 @@ async function cmd(method: string, params?: object): Promise<any> {
 
 const text = (s: string) => ({ output: [{ type: "text" as const, text: s }] });
 
+/** Page.captureScreenshot never returns for a hidden tab, so bring the attached tab forward and bound the wait. */
+async function capture(params: object) {
+	const id = await tab();
+	const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+	if (active?.id !== id) await chrome.tabs.update(id, { active: true });
+	const shot = cmd("Page.captureScreenshot", params);
+	shot.catch(() => {});
+	const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Page.captureScreenshot timed out; the tab could not be brought to the front")), 10_000));
+	return (await Promise.race([shot, timeout])) as { data: string };
+}
+
 const pageEval = defineTool({
 	name: "page_eval",
 	description:
@@ -223,7 +236,7 @@ const screenshot = defineTool({
 		const { cssVisualViewport: vp } = await cmd("Page.getLayoutMetrics");
 		const dpr = (await cmd("Runtime.evaluate", { expression: "devicePixelRatio", returnByValue: true })).result.value as number;
 		const c = crop ?? { x: 0, y: 0, width: vp.clientWidth, height: vp.clientHeight };
-		const { data } = await cmd("Page.captureScreenshot", {
+		const { data } = await capture({
 			format: "jpeg",
 			quality: 70,
 			// clip is in document coordinates; scale 1/dpr undoes the device pixel ratio.
@@ -283,7 +296,7 @@ const mouse = defineTool({
 		// Effect signal for canvas apps, where the element under the pointer says nothing: DOM mutations and pixels near the point.
 		const near = async () => {
 			const { cssVisualViewport: vp } = await cmd("Page.getLayoutMetrics");
-			return (await cmd("Page.captureScreenshot", { format: "png", clip: { x: vp.pageX + x! - 60, y: vp.pageY + y! - 60, width: 120, height: 120, scale: 1 } })).data as string;
+			return (await capture({ format: "png", clip: { x: vp.pageX + x! - 60, y: vp.pageY + y! - 60, width: 120, height: 120, scale: 1 } })).data as string;
 		};
 		await cmd("Runtime.evaluate", {
 			expression: `globalThis.__piObs?.disconnect(); globalThis.__piMut = 0; globalThis.__piObs = new MutationObserver((r) => (globalThis.__piMut += r.length));
